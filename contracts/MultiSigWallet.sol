@@ -20,7 +20,7 @@ contract MultiSigWallet {
     event TxExecuted(address indexed executor, uint256 indexed txid);
 
     //Threshold to have minimum no of owners to execute a transaction
-    uint public threshold;
+    uint public confirmationThreshold;
 
     //List to hold all the owner's address
     address[] public owners;
@@ -58,7 +58,7 @@ contract MultiSigWallet {
             mapOwners[owner] = true;
         }
         owners = _owners;
-        threshold = _threshold;
+        confirmationThreshold = _threshold;
     }
 
     receive() external payable {
@@ -70,8 +70,6 @@ contract MultiSigWallet {
         uint256 _value,
         bytes calldata _data
     ) external returns (uint256 txid) {
-        require(_dest != address(0), "Not a valid destination address");
-
         TransactionInfo storage txn = transactions.push();
         txn.dest = _dest;
         txn.value = _value;
@@ -86,6 +84,8 @@ contract MultiSigWallet {
 
         if (ti.approveOwners[msg.sender])
             revert("Already approved by the sender");
+
+        if (ti.isExecuted) revert("Transaction is already executed.");
 
         ti.approveOwners[msg.sender] = true;
         ti.approvalCount += 1;
@@ -107,16 +107,22 @@ contract MultiSigWallet {
         emit RevokeApproval(msg.sender, _txid);
     }
 
+    // Transaction can be executed by anyone, if it is approved by n owners owt of m
     function executeTransaction(uint256 _txid) external validTxn(_txid) {
         TransactionInfo storage ti = transactions[_txid];
 
         require(!ti.isExecuted, "Already executed");
-        require(ti.approvalCount >= threshold, "Not enough approvals");
+        require(
+            ti.approvalCount >= confirmationThreshold,
+            "Not enough approvals"
+        );
         require(address(this).balance >= ti.value, "Not enough balance");
 
         ti.isExecuted = true;
-        emit TxExecuted(msg.sender, _txid);
+
         (bool success, ) = address(ti.dest).call{value: ti.value}(ti.data);
         require(success, "transaction failed.");
+
+        emit TxExecuted(msg.sender, _txid);
     }
 }
